@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>معمل الـ ANC</title>
+<style>
+:root{--bg:#eef2f4;--fg:#14232b;--mut:#5b6d76;--card:#fff;--ac:#0b6e8a;--ac2:#d9eef4;--warn:#9a3b00;--bd:#cfdadf;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1a1f;--fg:#e6f0f3;--mut:#93a8b1;--card:#17262d;--ac:#4cc3e0;--ac2:#1b3a45;--warn:#ffb27a;--bd:#2c424b}}
+:root[data-theme="dark"]{--bg:#0f1a1f;--fg:#e6f0f3;--mut:#93a8b1;--card:#17262d;--ac:#4cc3e0;--ac2:#1b3a45;--warn:#ffb27a;--bd:#2c424b}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif;line-height:1.7}
+main{max-width:520px;margin:0 auto;padding:20px 18px 40px}
+h1{font-size:1.5rem;margin:8px 0 4px}
+p{margin:6px 0;color:var(--mut)}
+.warn{background:var(--card);border-inline-start:4px solid var(--warn);padding:10px 14px;border-radius:6px;color:var(--fg);margin:16px 0}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin:14px 0}
+label{display:flex;justify-content:space-between;font-weight:600;margin-top:10px}
+input[type=range]{width:100%;accent-color:var(--ac)}
+button{width:100%;font:inherit;font-weight:700;padding:14px;border-radius:10px;border:0;background:var(--ac);color:#fff;cursor:pointer;margin-top:8px}
+@media (prefers-color-scheme:dark){button{color:#06222b}}
+button.off{background:var(--ac2);color:var(--fg)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+canvas{width:100%;height:90px;display:block;background:var(--ac2);border-radius:8px}
+#st{font-weight:600;color:var(--fg)}
+small{color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<h1>معمل الـ ANC</h1>
+<p>بيسمع الصوت من ميكروفون الموبايل ويشغّل عكسه في السماعة.</p>
+<div class="warn">تجربة فقط. لازم تلبس السماعة (سلكية أفضل) قبل ما تبدأ، وإلا هيحصل صفير (feedback). ابدأ بالصوت واطي. النتيجة غالباً ضعيفة أو مش ملحوظة بسبب التأخير ومكان الميكروفون.</div>
+
+<div class="card">
+<button id="go">ابدأ</button>
+<p id="st">متوقف</p>
+<canvas id="cv" width="480" height="90"></canvas>
+<small id="lat"></small>
+</div>
+
+<div class="card">
+<label>قوة الصوت العكسي <span id="gv">30%</span></label>
+<input id="gain" type="range" min="0" max="100" value="30">
+<label>أعلى تردد بيتلغي <span id="fv">400 Hz</span></label>
+<input id="freq" type="range" min="80" max="1500" value="400">
+<small>الـ ANC بيشتغل أحسن على الترددات الواطية (هدير، موتور، مروحة). كل ما قللت التردد الأمان أكتر.</small>
+</div>
+</main>
+<script>
+(function(){
+var go=document.getElementById('go'),st=document.getElementById('st'),lat=document.getElementById('lat');
+var g=document.getElementById('gain'),f=document.getElementById('freq'),gv=document.getElementById('gv'),fv=document.getElementById('fv');
+var cv=document.getElementById('cv'),cx=cv.getContext('2d');
+var ctx,stream,src,lp,inv,an,raf,running=false;
+function setVals(){gv.textContent=g.value+'%';fv.textContent=f.value+' Hz';
+ if(inv)inv.gain.value=-(g.value/100);
+ if(lp)lp.frequency.value=+f.value;}
+g.oninput=f.oninput=setVals;
+function draw(){
+ var d=new Uint8Array(an.fftSize);an.getByteTimeDomainData(d);
+ var cs=getComputedStyle(document.documentElement).getPropertyValue('--ac').trim()||'#0b6e8a';
+ cx.clearRect(0,0,cv.width,cv.height);cx.strokeStyle=cs;cx.lineWidth=2;cx.beginPath();
+ for(var i=0;i<d.length;i++){var x=i/d.length*cv.width,y=d[i]/255*cv.height;i?cx.lineTo(x,y):cx.moveTo(x,y);}
+ cx.stroke();raf=requestAnimationFrame(draw);}
+async function start(){
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  ctx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+  src=ctx.createMediaStreamSource(stream);
+  lp=ctx.createBiquadFilter();lp.type='lowpass';
+  inv=ctx.createGain();
+  an=ctx.createAnalyser();an.fftSize=1024;
+  src.connect(lp);lp.connect(inv);inv.connect(ctx.destination);inv.connect(an);
+  setVals();
+  await ctx.resume();
+  var ms=((ctx.baseLatency||0)+(ctx.outputLatency||0))*1000;
+  lat.textContent='تأخير المتصفح التقريبي: '+ms.toFixed(0)+' ms (المطلوب أقل من 1 ms)';
+  running=true;go.textContent='إيقاف';go.className='off';st.textContent='شغال';draw();
+ }catch(e){st.textContent='فشل التشغيل ('+(e&&e.name?e.name:'خطأ')+'). لو الصفحة مفتوحة جوه التطبيق، افتح الرابط في Chrome أو Safari مباشرة.';}
+}
+function stop(){
+ running=false;cancelAnimationFrame(raf);
+ if(stream)stream.getTracks().forEach(function(t){t.stop();});
+ if(ctx)ctx.close();
+ go.textContent='ابدأ';go.className='';st.textContent='متوقف';}
+go.onclick=function(){running?stop():start();};
+})();
+</script>
+</body>
+</html>
